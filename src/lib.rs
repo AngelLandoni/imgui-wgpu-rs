@@ -63,7 +63,9 @@ impl Texture {
             mipmap_filter: FilterMode::Linear,
             lod_min_clamp: -100.0,
             lod_max_clamp: 100.0,
-            compare: CompareFunction::Always,
+            compare: Some(CompareFunction::Always),
+            anisotropy_clamp: Some(1),
+            label: None
         });
 
         // Create the texture bind group from the layout.
@@ -177,6 +179,7 @@ impl Renderer {
             label: None,
             size,
             usage: BufferUsage::UNIFORM | BufferUsage::COPY_DST,
+            mapped_at_creation: true,
         });
 
         // Create the uniform matrix buffer bind group layout.
@@ -195,10 +198,7 @@ impl Renderer {
             layout: &uniform_layout,
             bindings: &[Binding {
                 binding: 0,
-                resource: BindingResource::Buffer {
-                    buffer: &uniform_buffer,
-                    range: 0..size,
-                },
+                resource: BindingResource::Buffer(uniform_buffer.slice(0..size))
             }],
         });
 
@@ -404,8 +404,8 @@ impl Renderer {
         let vertex_buffer = &self.vertex_buffers[draw_list_buffers_index];
 
         // Make sure the current buffers are attached to the render pass.
-        rpass.set_index_buffer(&index_buffer, 0, WHOLE_BUFFER);
-        rpass.set_vertex_buffer(0, &vertex_buffer, 0, WHOLE_BUFFER);
+        rpass.set_index_buffer(index_buffer.slice(0..WHOLE_BUFFER));
+        rpass.set_vertex_buffer(0, vertex_buffer.slice(0..WHOLE_BUFFER));
 
         for cmd in draw_list.commands() {
             match cmd {
@@ -501,7 +501,6 @@ impl Renderer {
                 height,
                 depth: 1,
             },
-            array_layer_count: 1,
             mip_level_count: 1,
             sample_count: 1,
             dimension: TextureDimension::D2,
@@ -520,14 +519,15 @@ impl Renderer {
         encoder.copy_buffer_to_texture(
             BufferCopyView {
                 buffer: &buffer,
-                offset: 0,
-                bytes_per_row: bytes as u32 / height,
-                rows_per_image: height,
+                layout: TextureDataLayout {
+                    offset: 0,
+                    bytes_per_row: bytes as u32 / height,
+                    rows_per_image: height,
+                }
             },
             TextureCopyView {
                 texture: &texture,
                 mip_level: 0,
-                array_layer: 0,
                 origin: Origin3d { x: 0, y: 0, z: 0 },
             },
             Extent3d {
@@ -538,7 +538,7 @@ impl Renderer {
         );
 
         // Resolve the actual copy process.
-        queue.submit(&[encoder.finish()]);
+        queue.submit(Some(encoder.finish()));
 
         let texture = Texture::new(texture, &self.texture_layout, device);
         self.textures.insert(texture)
